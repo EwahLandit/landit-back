@@ -52,11 +52,11 @@ def seed_initial_data(user: User, db: Session):
     """Crea datos iniciales cuando un usuario se registra."""
     # Notificaciones de bienvenida
     welcome_notifs = [
-        Notification(user_id=user.id, icon="🚀", icon_bg="rgba(0,87,255,.12)", icon_color="var(--accent)",
+        Notification(user_id=user.id, icon="rocket", icon_bg="rgba(0,87,255,.12)", icon_color="var(--accent)",
                      title="¡Bienvenido a LandIt! Tu prueba de 15 días ha comenzado.", is_read=False),
-        Notification(user_id=user.id, icon="📖", icon_bg="rgba(0,168,107,.12)", icon_color="var(--success)",
+        Notification(user_id=user.id, icon="book", icon_bg="rgba(0,168,107,.12)", icon_color="var(--success)",
                      title="Explora el editor de plantillas para crear tu primera landing page.", is_read=False),
-        Notification(user_id=user.id, icon="💡", icon_bg="rgba(255,153,0,.12)", icon_color="var(--warning)",
+        Notification(user_id=user.id, icon="lightbulb", icon_bg="rgba(255,153,0,.12)", icon_color="var(--warning)",
                      title="Consejo: Conecta tu dominio personalizado en 'Mi Sitio Web'.", is_read=True),
     ]
     db.add_all(welcome_notifs)
@@ -162,7 +162,7 @@ def billing_upgrade(body: PlanUpgrade, db: Session = Depends(get_db), current_us
     db.refresh(current_user)
     # Notificación de upgrade
     db.add(Notification(
-        user_id=current_user.id, icon="💳",
+        user_id=current_user.id, icon="billing",
         icon_bg="rgba(0,168,107,.12)", icon_color="var(--success)",
         title=f"¡Plan {body.plan.capitalize()} activado correctamente! Bienvenido.",
         is_read=False,
@@ -209,7 +209,7 @@ def create_website(body: WebsiteCreate, db: Session = Depends(get_db), current_u
     db.commit()
     # Notificación
     db.add(Notification(
-        user_id=current_user.id, icon="🚀",
+        user_id=current_user.id, icon="rocket",
         icon_bg="rgba(0,87,255,.12)", icon_color="var(--accent)",
         title=f"Tu sitio '{body.slug}' fue creado exitosamente.", is_read=False,
     ))
@@ -375,7 +375,7 @@ def create_ticket(body: TicketCreate, db: Session = Depends(get_db), current_use
     db.refresh(ticket)
     # Notificación automática
     db.add(Notification(
-        user_id=current_user.id, icon="💬",
+        user_id=current_user.id, icon="chat",
         icon_bg="rgba(255,153,0,.12)", icon_color="var(--warning)",
         title=f"Ticket #{ticket.id} creado: '{body.title}'. Te responderemos pronto.",
         is_read=False,

@@ -88,7 +88,7 @@ class Notification(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-    icon = Column(String(10), default="🔔")
+    icon = Column(String(20), default="bell")
     icon_bg = Column(String(50), default="rgba(0,87,255,.12)")
     icon_color = Column(String(50), default="var(--accent)")
     title = Column(String(255), nullable=False)
