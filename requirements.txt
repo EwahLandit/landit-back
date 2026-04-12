@@ -1,0 +1,12 @@
+fastapi
+uvicorn[standard]
+python-dotenv
+sqlalchemy
+pymysql
+cryptography
+bcrypt==4.0.1
+python-jose[cryptography]
+email-validator
+pytest
+httpx
+pytest-asyncio
