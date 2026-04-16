@@ -1,14 +1,18 @@
 import os
+import io
+import uuid
+import json
 import secrets
 from dotenv import load_dotenv
 from typing import Optional, List
 from datetime import datetime, timedelta, timezone, date
-from fastapi import FastAPI, Depends, HTTPException, status
+from fastapi import FastAPI, Depends, HTTPException, status, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
 
 from database import engine, get_db, Base
-from models import User, Website, Domain, WebVitals, SiteVisit, Notification, SupportTicket, ApiKey
+from models import User, Website, Domain, WebVitals, SiteVisit, Notification, SupportTicket, ApiKey, Asset, FormSubmission
 from schemas import (
     UserRegister, UserLogin, Token, UserOut, UserUpdate, PasswordChange,
     WebsiteCreate, WebsiteOut, WebsiteUpdate, DomainCreate, DomainOut,
@@ -16,6 +20,7 @@ from schemas import (
     DashboardStats, DailyStats,
     NotificationOut, TicketCreate, TicketOut,
     ApiKeyCreate, ApiKeyOut,
+    BlockIn, SiteContentIn, AssetOut, FormSubmissionIn,
 )
 from auth import hash_password, verify_password, create_access_token, decode_token
 from fastapi.security import OAuth2PasswordBearer
@@ -24,6 +29,12 @@ load_dotenv()
 Base.metadata.create_all(bind=engine)
 
 FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173")
+API_BASE = os.getenv("API_BASE", "http://localhost:8000")
+UPLOADS_DIR = "uploads"
+os.makedirs(UPLOADS_DIR, exist_ok=True)
+
+ALLOWED_BLOCK_TYPES: set[str] = set()  # populated after block registry stabilises; empty = accept-all in v1
+
 app = FastAPI(title="LandIt API")
 app.add_middleware(
     CORSMiddleware,
@@ -32,6 +43,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.mount("/uploads", StaticFiles(directory=UPLOADS_DIR), name="uploads")
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/login", auto_error=False)
 
@@ -264,6 +277,112 @@ def delete_domain(domain_id: int, db: Session = Depends(get_db), current_user: U
     db.delete(domain)
     db.commit()
     return {"message": "Dominio eliminado"}
+
+
+# ── BLOCK BUILDER ─────────────────────────────────────────────────────────
+
+@app.put("/websites/{website_id}/blocks")
+def save_blocks(website_id: int, body: SiteContentIn, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    if body.schema_version != 2:
+        raise HTTPException(status_code=422, detail="schema_version must be 2")
+    if len(body.blocks) > 80:
+        raise HTTPException(status_code=422, detail="Demasiados bloques (máximo 80)")
+    if ALLOWED_BLOCK_TYPES:
+        invalid = [b.type for b in body.blocks if b.type not in ALLOWED_BLOCK_TYPES]
+        if invalid:
+            raise HTTPException(status_code=422, detail=f"Tipos de bloque no válidos: {invalid}")
+    payload_bytes = len(json.dumps(body.model_dump()).encode())
+    if payload_bytes > 256 * 1024:
+        raise HTTPException(status_code=413, detail="Payload demasiado grande (máximo 256 KB)")
+    site = db.query(Website).filter(Website.id == website_id, Website.user_id == current_user.id).first()
+    if not site:
+        raise HTTPException(status_code=404, detail="Sitio no encontrado")
+    site.content = body.model_dump()
+    db.commit()
+    return {"message": "Bloques guardados"}
+
+
+@app.post("/websites/{website_id}/assets", response_model=AssetOut)
+async def upload_asset(website_id: int, file: UploadFile = File(...), db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    from PIL import Image as PilImage
+    site = db.query(Website).filter(Website.id == website_id, Website.user_id == current_user.id).first()
+    if not site:
+        raise HTTPException(status_code=404, detail="Sitio no encontrado")
+    ALLOWED_MIME = {"image/png", "image/jpeg", "image/webp", "image/svg+xml"}
+    if file.content_type not in ALLOWED_MIME:
+        raise HTTPException(status_code=422, detail="Tipo de archivo no soportado (png, jpg, webp, svg)")
+    content = await file.read()
+    if len(content) > 5 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="Archivo demasiado grande (máximo 5 MB)")
+    ext = file.filename.rsplit(".", 1)[-1].lower() if file.filename and "." in file.filename else "bin"
+    file_uuid = str(uuid.uuid4())
+    site_dir = os.path.join(UPLOADS_DIR, str(website_id))
+    os.makedirs(site_dir, exist_ok=True)
+    rel_path = f"{website_id}/{file_uuid}.{ext}"
+    abs_path = os.path.join(UPLOADS_DIR, rel_path)
+    with open(abs_path, "wb") as f:
+        f.write(content)
+    width, height = None, None
+    if file.content_type != "image/svg+xml":
+        img = PilImage.open(io.BytesIO(content))
+        width, height = img.size
+    asset_url = f"{API_BASE}/uploads/{rel_path}"
+    asset = Asset(
+        website_id=website_id,
+        filename=file.filename or f"{file_uuid}.{ext}",
+        url=asset_url,
+        mime_type=file.content_type,
+        size_bytes=len(content),
+        width=width,
+        height=height,
+    )
+    db.add(asset)
+    db.commit()
+    db.refresh(asset)
+    return asset
+
+
+@app.get("/websites/{website_id}/assets", response_model=List[AssetOut])
+def list_assets(website_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    site = db.query(Website).filter(Website.id == website_id, Website.user_id == current_user.id).first()
+    if not site:
+        raise HTTPException(status_code=404, detail="Sitio no encontrado")
+    return db.query(Asset).filter(Asset.website_id == website_id).order_by(Asset.created_at.desc()).all()
+
+
+@app.delete("/websites/{website_id}/assets/{asset_id}")
+def delete_asset(website_id: int, asset_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    site = db.query(Website).filter(Website.id == website_id, Website.user_id == current_user.id).first()
+    if not site:
+        raise HTTPException(status_code=404, detail="Sitio no encontrado")
+    asset = db.query(Asset).filter(Asset.id == asset_id, Asset.website_id == website_id).first()
+    if not asset:
+        raise HTTPException(status_code=404, detail="Recurso no encontrado")
+    file_path = os.path.join(UPLOADS_DIR, str(website_id), os.path.basename(asset.url))
+    if os.path.exists(file_path):
+        os.remove(file_path)
+    db.delete(asset)
+    db.commit()
+    return {"message": "Recurso eliminado"}
+
+
+@app.get("/public/sites/{slug}")
+def get_public_site(slug: str, db: Session = Depends(get_db)):
+    site = db.query(Website).filter(Website.slug == slug).first()
+    if not site:
+        raise HTTPException(status_code=404, detail="Sitio no encontrado")
+    return {"content": site.content, "slug": site.slug}
+
+
+@app.post("/public/sites/{slug}/submit")
+def submit_form(slug: str, body: FormSubmissionIn, db: Session = Depends(get_db)):
+    site = db.query(Website).filter(Website.slug == slug).first()
+    if not site:
+        raise HTTPException(status_code=404, detail="Sitio no encontrado")
+    submission = FormSubmission(website_id=site.id, block_id=body.block_id, payload=body.fields)
+    db.add(submission)
+    db.commit()
+    return {"message": "Formulario enviado correctamente"}
 
 
 # ── ANALYTICS / DASHBOARD STATS ───────────────────────────────────────────

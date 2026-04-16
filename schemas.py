@@ -151,6 +151,37 @@ class TicketOut(BaseModel):
     class Config:
         from_attributes = True
 
+# ── BLOCK BUILDER ─────────────────────────────────────────────────────────
+
+class BlockIn(BaseModel):
+    id: str
+    type: str
+    visible: bool
+    config: Dict[str, Any]
+    mobile_config: Optional[Dict[str, Any]] = None
+
+class SiteContentIn(BaseModel):
+    schema_version: int
+    site: Dict[str, Any]
+    theme: Dict[str, Any]
+    blocks: List[BlockIn]
+
+class AssetOut(BaseModel):
+    id: int
+    filename: str
+    url: str
+    mime_type: str
+    size_bytes: int
+    width: Optional[int] = None
+    height: Optional[int] = None
+    created_at: datetime
+    class Config:
+        from_attributes = True
+
+class FormSubmissionIn(BaseModel):
+    block_id: str
+    fields: Dict[str, Any]
+
 # ── API KEYS ──────────────────────────────────────────────────────────────
 
 class ApiKeyCreate(BaseModel):

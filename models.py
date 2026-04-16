@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, JSON, Float, Text
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, JSON, Float, Text, BigInteger
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from database import Base
@@ -44,6 +44,8 @@ class Website(Base):
     domains = relationship("Domain", back_populates="website", cascade="all, delete-orphan")
     vitals = relationship("WebVitals", back_populates="website", cascade="all, delete-orphan")
     visits = relationship("SiteVisit", back_populates="website", cascade="all, delete-orphan")
+    assets = relationship("Asset", back_populates="website", cascade="all, delete-orphan")
+    form_submissions = relationship("FormSubmission", back_populates="website", cascade="all, delete-orphan")
 
 
 class Domain(Base):
@@ -111,6 +113,34 @@ class SupportTicket(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     user = relationship("User", back_populates="tickets")
+
+
+class Asset(Base):
+    __tablename__ = "assets"
+
+    id = Column(Integer, primary_key=True, index=True)
+    website_id = Column(Integer, ForeignKey("websites.id"), nullable=False)
+    filename = Column(String(255), nullable=False)
+    url = Column(String(500), nullable=False)
+    mime_type = Column(String(100), nullable=False)
+    size_bytes = Column(BigInteger, nullable=False)
+    width = Column(Integer, nullable=True)
+    height = Column(Integer, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    website = relationship("Website", back_populates="assets")
+
+
+class FormSubmission(Base):
+    __tablename__ = "form_submissions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    website_id = Column(Integer, ForeignKey("websites.id"), nullable=False)
+    block_id = Column(String(50), nullable=False)
+    payload = Column(JSON, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    website = relationship("Website", back_populates="form_submissions")
 
 
 class ApiKey(Base):
